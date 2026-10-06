@@ -36,6 +36,7 @@ app.get('/', (req, res) => res.json({ ok: true, app: 'demo-api', version: VERSIO
 app.get('/version', (req, res) => res.json({ version: VERSION }));
 
 // Liveness : ne touche PAS la base (le conteneur peut vivre sans la base).
+// Repond meme si PostgreSQL n'est pas encore lance.
 app.get('/health', (req, res) => res.json({ status: 'UP' }));
 
 // Readiness : la base repond-elle ? Sert au HEALTHCHECK du Dockerfile.
