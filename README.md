@@ -19,6 +19,31 @@ Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
 PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
 la première quête que de la faire tourner dans Docker.
 
+## Récupérer ce starter dans ton propre repo
+
+Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
+directement ici. Avant de démarrer la première quête :
+
+1. **Clone** ce repo starter :
+   ```bash
+   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
+   cd NOM_prenom_demo-api
+   ```
+2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
+   ```bash
+   git remote remove origin
+   ```
+3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
+   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
+   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
+   ```bash
+   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
+   git push -u origin main
+   ```
+
+À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
+et c'est lui qui sera évalué — pas le starter.
+
 ## Ce que contient le repo
 
 | Fichier | Rôle |
