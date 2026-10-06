@@ -42,7 +42,7 @@ directement ici. Avant de démarrer la première quête :
    ```
 
 À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué — pas le starter.
+et c'est lui qui sera évalué, pas le starter.
 
 ## Ce que contient le repo
 
