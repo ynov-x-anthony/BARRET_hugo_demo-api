@@ -1,15 +1,21 @@
-# Image de base Node légère, version épinglée
-FROM node:22-alpine
+# Version précise de Node, pour savoir exactement ce qui tourne
+FROM node:22.11-alpine
 
 WORKDIR /app
 
-# Dépendances d'abord : cette couche reste en cache tant que
-# package.json / package-lock.json ne bougent pas
-COPY package.json package-lock.json ./
+# Dépendances d'abord (cache), fichiers donnés à l'utilisateur node
+COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# Puis le code, qui change plus souvent
-COPY server.js db.js ./
+# Puis le code
+COPY --chown=node:node server.js db.js ./
+
+# Le conteneur vérifie tout seul que l'API répond
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# On quitte root juste avant de lancer l'app
+USER node
 
 EXPOSE 3000
 
