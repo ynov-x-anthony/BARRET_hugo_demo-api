@@ -1,5 +1,5 @@
 # Version précise de Node, pour savoir exactement ce qui tourne
-FROM node:22.11-alpine
+FROM node:22.23.3-alpine3.24
 
 WORKDIR /app
 
