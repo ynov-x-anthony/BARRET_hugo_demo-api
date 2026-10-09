@@ -2,7 +2,7 @@
 
 # Image de base des deux étapes, à un seul endroit : version précise
 # et récente (une base jamais mise à jour accumule les CVE)
-ARG NODE_IMAGE=node:22.11-alpine
+ARG NODE_IMAGE=node:22.23.3-alpine3.24
 
 # --- Étape 1 : on installe les dépendances (jetable) ---
 FROM ${NODE_IMAGE} AS deps
