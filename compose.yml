@@ -1,0 +1,59 @@
+name: demo-api
+
+services:
+  api:
+    build: ./api
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGDATABASE: ${POSTGRES_DB}
+    # db.js lit PGPASSWORD : on le remplit depuis le secret au démarrage,
+    # puis exec pour que node reste le PID 1 (arrêt propre sur SIGTERM)
+    command: ["sh", "-c", "PGPASSWORD=\"$$(cat /run/secrets/db_password)\" exec node server.js"]
+    secrets: [db_password]
+    ports:
+      - "${API_PORT:-8080}:3000"
+    networks: [front, back]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: ${POSTGRES_DB}
+    secrets: [db_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [back]
+    healthcheck:
+      # -h 127.0.0.1 : test en TCP, pour ne pas valider le serveur temporaire
+      # que l'image lance (socket Unix seulement) pendant init.sql
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    networks: [back]
+    depends_on: [db]
+    restart: unless-stopped
+
+networks:
+  front:
+  back:
+
+volumes:
+  pgdata:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt

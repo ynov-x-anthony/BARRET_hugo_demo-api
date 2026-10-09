@@ -1,89 +1,87 @@
-# demo-api
+# demo-api – Hugo Barret
 
-Le fil rouge des quêtes Docker : une mini-API "catalogue" que tu vas
-conteneuriser, faire persister, mettre en réseau, orchestrer et sécuriser,
-une quête à la fois.
+Fil rouge des quêtes Docker : une mini-API « catalogue » (Node + Express) avec une base PostgreSQL, que je fais évoluer quête après quête. Le starter vient de [ynov-x-anthony/docker-demo-api-starter](https://github.com/ynov-x-anthony/docker-demo-api-starter).
 
-Le métier est volontairement trivial (`Node` + `Express` + `PostgreSQL`,
-un catalogue de produits) : toute la difficulté est sur **Docker**, jamais
-sur le code applicatif.
+## Lancer la stack (Compose)
 
-## Point de départ
+### Prérequis
 
-Ce dossier est ce que tu clones **avant ta première quête Docker**. Il n'y a
-volontairement **aucun fichier Docker** dedans, ni `Dockerfile`, ni
-`compose.yml` : ce sont précisément les fichiers que tu vas écrire, quête
-après quête, en faisant grossir ce dépôt.
+- Docker Desktop (ou Docker Engine) avec **Compose v2** : `docker compose version` doit répondre.
+- Ports **8080** (API) et **8081** (Adminer) libres, ou à changer dans `.env`.
 
-Sans conteneur, cette API ne démarre pas telle quelle : elle a besoin d'un
-PostgreSQL joignable pour répondre. C'est normal, et c'est tout le sujet de
-la première quête que de la faire tourner dans Docker.
+### Démarrage
 
-## Récupérer ce starter dans ton propre repo
+```bash
+# 1. Les variables (utilisateur, base, ports)
+cp .env.example .env
 
-Ce dépôt est un **starter en lecture seule** : tu ne pousses jamais
-directement ici. Avant de démarrer la première quête :
+# 2. Le mot de passe de la base, en secret (dossier ignoré par Git)
+mkdir -p secrets
+echo "un-mot-de-passe-solide" > secrets/db_password.txt
 
-1. **Clone** ce repo starter :
-   ```bash
-   git clone git@github.com:ynov-x-anthony/docker-demo-api-starter.git NOM_prenom_demo-api
-   cd NOM_prenom_demo-api
-   ```
-2. **Supprime le remote `origin`** (il pointe vers le starter, pas vers toi) :
-   ```bash
-   git remote remove origin
-   ```
-3. **Crée ton propre repo** sur GitHub, dans l'organisation `ynov-x-anthony`,
-   en respectant la nomenclature **`NOM_prenom_demo-api`** (ex. :
-   `DUPONT_jean_demo-api`), puis ajoute-le comme nouveau remote et pousse :
-   ```bash
-   git remote add origin git@github.com:ynov-x-anthony/NOM_prenom_demo-api.git
-   git push -u origin main
-   ```
+# 3. Build + démarrage
+docker compose up -d --build
+```
 
-À partir de là, c'est **ton** repo : chaque quête s'y ajoute par des commits,
-et c'est lui qui sera évalué, pas le starter.
+Sous PowerShell, l'étape 2 donne : `New-Item -ItemType Directory -Force secrets; Set-Content secrets\db_password.txt "un-mot-de-passe-solide" -NoNewline`.
 
-## Ce que contient le repo
+### URLs
 
-| Fichier | Rôle |
+| Service | URL |
 |---|---|
-| `api/server.js` | l'API Express (`/`, `/version`, `/health`, `/ready`, `/products`) |
-| `api/db.js` | connexion PostgreSQL, entièrement pilotée par des variables d'environnement |
-| `api/package.json`, `api/package-lock.json` | dépendances (`express`, `pg`) |
-| `db/init.sql` | création de la table `products` + quelques données de démo |
+| API | http://localhost:8080 (`/health`, `/ready`, `/products`) |
+| Adminer | http://localhost:8081 : système **PostgreSQL**, serveur `db`, utilisateur `demo`, mot de passe = contenu de `secrets/db_password.txt`, base `demo` |
 
-## Les routes de l'API
+### Ce que j'ai testé
 
-| Méthode | Route | Effet |
-|---|---|---|
-| `GET` | `/` | infos application + version |
-| `GET` | `/version` | numéro de version courant |
-| `GET` | `/health` | liveness, ne touche pas la base |
-| `GET` | `/ready` | readiness, teste la connexion à la base |
-| `GET` | `/products` | liste des produits |
-| `POST` | `/products` | crée un produit : `{ "name": "...", "price_cents": 1234 }` |
+Commande : `docker compose up -d --build`, puis :
 
-## Ta progression, quête après quête
+```
+$ docker compose ps
+NAME                 IMAGE                COMMAND                  SERVICE   STATUS                    PORTS
+demo-api-adminer-1   adminer:4            "entrypoint.sh docke…"   adminer   Up 22 seconds             0.0.0.0:8081->8080/tcp
+demo-api-api-1       demo-api-api         "docker-entrypoint.s…"   api       Up 16 seconds (healthy)   0.0.0.0:8080->3000/tcp
+demo-api-db-1        postgres:16-alpine   "docker-entrypoint.s…"   db        Up 22 seconds (healthy)   5432/tcp
 
-| Quête | Ce que tu ajoutes au repo |
+$ curl -s localhost:8080/products
+[{"id":3,"name":"T-shirt conteneur",...},{"id":2,"name":"Mug Docker",...},{"id":1,"name":"Sticker Demo",...}]
+
+$ curl -s -X POST -H 'content-type: application/json' -d '{"name":"Gourde","price_cents":900}' localhost:8080/products
+{"id":4,"name":"Gourde","price_cents":900,"created_at":"2026-10-09T08:07:20.294Z"}
+
+$ docker compose down && docker compose up -d
+$ curl -s localhost:8080/products
+[{"id":4,"name":"Gourde",...},{"id":3,"name":"T-shirt conteneur",...},...]
+```
+
+La Gourde survit au `down` / `up` : les données sont dans le volume `pgdata`, que `down` ne supprime pas.
+
+### Arrêter / repartir de zéro
+
+```bash
+docker compose down      # supprime conteneurs + réseaux, GARDE les données
+docker compose down -v   # supprime aussi le volume pgdata : base vide, init.sql rejoué au prochain up
+```
+
+## Comment c'est construit
+
+- **3 services** : `api` (buildée depuis `./api`), `db` (`postgres:16-alpine`), `adminer` (`adminer:4`).
+- **Réseaux** : `front` (api) et `back` (api, db, adminer). La base n'a pas de `ports:`, elle n'est joignable que depuis `back`.
+- **Ordre de démarrage** : `db` a un healthcheck `pg_isready`, et `api` attend `condition: service_healthy`. Le healthcheck teste en TCP (`-h 127.0.0.1`) pour ne pas valider le serveur temporaire que postgres lance pendant `init.sql`.
+- **Variables** : `.env` sert à l'interpolation `${...}` dans `compose.yml`. Il n'est pas commité, `.env.example` l'est.
+- **Mot de passe en secret** : `secrets/db_password.txt` est monté dans `/run/secrets/db_password`.
+  - Postgres le lit via `POSTGRES_PASSWORD_FILE`.
+  - L'API (dont `db.js` attend `PGPASSWORD`) le lit au démarrage : `command: sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec node server.js'`. Le `exec` garde `node` en PID 1.
+  - Résultat : le mot de passe n'apparaît pas dans `docker inspect`.
+
+## Les autres fichiers des quêtes
+
+| Fichier | Quête |
 |---|---|
-| Découverte de Docker | rien ici, tu manipules des images publiques et un `psql` en conteneur |
-| Le Dockerfile | `api/Dockerfile`, `api/.dockerignore` : l'API tourne enfin dans un conteneur |
-| Les volumes | un volume nommé pour la persistance de PostgreSQL |
-| Les réseaux | des réseaux dédiés, la base jamais exposée directement |
-| Compose | `compose.yml`, `.env.example` : tous les services démarrent ensemble |
-| Dockerfile et sécurité | ton `Dockerfile` durci : utilisateur non-root, `HEALTHCHECK` |
-| Builds multi-étapes et gestion des secrets | `api/Dockerfile.multi` : image allégée, secrets hors de l'image |
-| Analyse de vulnérabilité avec Trivy | un pipeline CI qui scanne ton image et bloque sur les failles critiques |
+| `api/Dockerfile` | Le Dockerfile, puis Dockerfile et sécurité (non-root, HEALTHCHECK) |
+| `api/Dockerfile.multi`, `api/Dockerfile.naive` | Builds multi-étapes et secrets |
+| `volumes_hugo_barret.sh` | Les volumes |
+| `reseaux_hugo_barret.sh` | Les réseaux |
+| `compose.yml`, `.env.example` | Compose |
 
-## Prérequis machine (macOS / Linux / Windows)
-
-- **Docker Engine + Compose v2** : le plugin intégré, invoqué en deux mots
-  `docker compose` (pas l'ancien binaire autonome `docker-compose` v1).
-  `docker compose version` doit répondre `v2.x` ou une version supérieure
-  (v3, v4, v5…). Ce qui compte, c'est que ce ne soit pas du v1 legacy.
-- macOS / Windows : **Docker Desktop** (ou Colima / Rancher Desktop).
-  Sous Windows, backend **WSL 2** : travaille depuis un terminal **WSL**.
-- `git`, `curl`. Node est nécessaire **seulement** si tu régénères
-  `package-lock.json` (`cd api && npm install`, déjà commité ici).
+Les routes de l'API : `GET /`, `/version`, `/health` (liveness), `/ready` (teste la base), `GET /products`, `POST /products` avec `{ "name": "...", "price_cents": 1234 }`.
