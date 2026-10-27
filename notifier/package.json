@@ -1,0 +1,9 @@
+{
+  "name": "notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Service de notification de demo-api",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.21.2" }
+}
