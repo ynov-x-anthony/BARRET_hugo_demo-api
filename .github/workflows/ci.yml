@@ -7,8 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-et-scan:
+  # Un job par service (matrix) : chaque image est buildée, scannée et
+  # publiée indépendamment. Push sur GHCR uniquement sur les tags v*.
+  image:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: api/Dockerfile.multi
+          - service: notifier
+            dockerfile: notifier/Dockerfile
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
@@ -16,23 +29,94 @@ jobs:
       - name: Préparer Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build (local, pour scanner)
+      # GHCR refuse les majuscules : "BARRET_hugo_demo-api" -> "barret_hugo_demo-api"
+      - name: Nom de l'image
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.service }}" >> "$GITHUB_ENV"
+
+      - name: Build ${{ matrix.service }}
         uses: docker/build-push-action@v6
         with:
-          context: ./api
-          file: ./api/Dockerfile.multi
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.dockerfile }}
           load: true
-          tags: demo-api:ci
+          tags: ${{ env.IMAGE }}:ci
 
-      # La gate : le job échoue si une CVE HIGH/CRITICAL avec correctif
-      # disponible est trouvée dans l'image
-      # Épinglée par SHA de commit (v0.36.0) : un tag peut être déplacé,
-      # un SHA non. Le "0.28.0" du cours n'existe plus (tags préfixés "v").
-      - name: Scan Trivy
+      # La gate : bloquante (exit-code 1) sur les tags v*, informative ailleurs.
+      # Épinglée par SHA de commit (v0.36.0).
+      - name: Scan Trivy ${{ matrix.service }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: demo-api:ci
+          image-ref: ${{ env.IMAGE }}:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
           format: table
+
+      - name: Login GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On pousse l'image qui vient d'être scannée (pas un nouveau build)
+      - name: Publier ${{ matrix.service }}:${{ github.ref_name }}
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          docker tag "$IMAGE:ci" "$IMAGE:${{ github.ref_name }}"
+          docker push "$IMAGE:${{ github.ref_name }}"
+
+  # Déploiement continu, simulé sur le runner GitHub (pas de VM disponible) :
+  # même mécanique qu'en SSH sur un serveur -> pull des images publiées, up -d.
+  deploy:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Récupérer le code (compose.yml, db/init.sql)
+        uses: actions/checkout@v4
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Sur un vrai serveur, .env et le secret existent déjà sur la machine.
+      # Ici on les crée : mot de passe aléatoire, jamais écrit dans le repo.
+      - name: Préparer la configuration du "serveur"
+        run: |
+          cp .env.example .env
+          echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> .env
+          echo "IMAGE_TAG=${{ github.ref_name }}" >> .env
+          mkdir -p secrets
+          openssl rand -hex 16 > secrets/db_password.txt
+
+      - name: Déployer (docker compose pull && up -d)
+        run: |
+          docker compose pull
+          docker compose up -d --no-build
+          docker image prune -f
+          docker compose images
+
+      - name: Vérifier la stack de bout en bout
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf localhost:8080/ready && break
+            sleep 2
+          done
+          echo
+          docker compose ps
+          curl -sf -X POST localhost:8080/products \
+            -H "Content-Type: application/json" \
+            -d '{"name":"Deploy ${{ github.ref_name }}","price_cents":100}'
+          echo
+          sleep 2
+          docker compose logs notifier
+          docker compose logs notifier | grep -q "nouveau produit"
+          echo "OK : notifier a reçu la notification"
