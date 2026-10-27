@@ -65,14 +65,24 @@ docker compose down -v   # supprime aussi le volume pgdata : base vide, init.sql
 
 ## Comment c'est construit
 
-- **3 services** : `api` (buildée depuis `./api`), `db` (`postgres:16-alpine`), `adminer` (`adminer:4`).
-- **Réseaux** : `front` (api) et `back` (api, db, adminer). La base n'a pas de `ports:`, elle n'est joignable que depuis `back`.
+- **4 services** : `api` (buildée depuis `api/Dockerfile.multi`), `notifier` (buildé depuis `./notifier`), `db` (`postgres:16-alpine`), `adminer` (`adminer:4`).
+- **Réseaux** : `front` (api) et `back` (api, notifier, db, adminer). Ni la base ni `notifier` n'ont de `ports:` : ils ne sont joignables que depuis `back`.
+- **notifier** : un second service métier, avec son propre `package.json`, son propre Dockerfile (multi-étapes, non-root, HEALTHCHECK) et sa propre image. Après chaque `POST /products`, l'API l'appelle sur `http://notifier:4000/notify`, en best-effort : l'appel part après la réponse 201, avec un timeout de 2 s, et une panne de notifier ne fait jamais échouer la création du produit (juste un `notify failed` dans les logs de l'API).
 - **Ordre de démarrage** : `db` a un healthcheck `pg_isready`, et `api` attend `condition: service_healthy`. Le healthcheck teste en TCP (`-h 127.0.0.1`) pour ne pas valider le serveur temporaire que postgres lance pendant `init.sql`.
 - **Variables** : `.env` sert à l'interpolation `${...}` dans `compose.yml`. Il n'est pas commité, `.env.example` l'est.
 - **Mot de passe en secret** : `secrets/db_password.txt` est monté dans `/run/secrets/db_password`.
   - Postgres le lit via `POSTGRES_PASSWORD_FILE`.
   - L'API (dont `db.js` attend `PGPASSWORD`) le lit au démarrage : `command: sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec node server.js'`. Le `exec` garde `node` en PID 1.
   - Résultat : le mot de passe n'apparaît pas dans `docker inspect`.
+
+## CI/CD (`.github/workflows/ci.yml`)
+
+- **Job `image`, en matrice `api` / `notifier`** : chaque service est buildé, scanné par Trivy (HIGH/CRITICAL, `ignore-unfixed`) et, sur un tag `v*`, publié sur `ghcr.io/ynov-x-anthony/barret_hugo_demo-api/<service>:<tag>`. La gate Trivy est bloquante sur les tags. On pousse l'image qui vient d'être scannée, pas un nouveau build.
+- **Job `deploy`** (après les deux jobs `image`, seulement sur les tags `v*`) : `docker compose pull` des images publiées puis `docker compose up -d --no-build`, puis vérification de bout en bout (`/ready`, un `POST /products`, et la notification dans les logs de notifier).
+- **Le déploiement est simulé sur le runner GitHub** (pas de serveur disponible) : même mécanique qu'en SSH sur une VM, où `.env` et le secret existeraient déjà. Ici le job les crée, avec un mot de passe aléatoire.
+- `compose.yml` nomme les images `${IMAGE_PREFIX}/<service>:${IMAGE_TAG}` : `demo-api/<service>:local` en local, l'image GHCR du tag au déploiement.
+
+Pour déployer une version : `git tag v1.5.1 && git push origin v1.5.1`.
 
 ## Les autres fichiers des quêtes
 
@@ -83,5 +93,7 @@ docker compose down -v   # supprime aussi le volume pgdata : base vide, init.sql
 | `volumes_hugo_barret.sh` | Les volumes |
 | `reseaux_hugo_barret.sh` | Les réseaux |
 | `compose.yml`, `.env.example` | Compose |
+| `.github/workflows/ci.yml`, `scans/` | Analyse de vulnérabilité avec Trivy |
+| `notifier/`, `compose.yml`, `ci.yml` (matrice + deploy) | Microservices et déploiement continu |
 
 Les routes de l'API : `GET /`, `/version`, `/health` (liveness), `/ready` (teste la base), `GET /products`, `POST /products` avec `{ "name": "...", "price_cents": 1234 }`.
