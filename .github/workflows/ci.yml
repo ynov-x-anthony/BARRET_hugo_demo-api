@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-et-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Préparer Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (local, pour scanner)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          file: ./api/Dockerfile.multi
+          load: true
+          tags: demo-api:ci
+
+      # La gate : le job échoue si une CVE HIGH/CRITICAL avec correctif
+      # disponible est trouvée dans l'image
+      # Épinglée par SHA de commit (v0.36.0) : un tag peut être déplacé,
+      # un SHA non. Le "0.28.0" du cours n'existe plus (tags préfixés "v").
+      - name: Scan Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: demo-api:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
