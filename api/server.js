@@ -57,6 +57,21 @@ app.get('/products', async (req, res) => {
   }
 });
 
+// Adresse de notifier sur le réseau Compose : "notifier" = le nom du service
+const NOTIFIER_URL = `http://notifier:${process.env.NOTIFIER_PORT || 4000}`;
+
+// Best-effort : on ne fait jamais échouer la création du produit si notifier est absent
+function notifierNouveauProduit(product) {
+  fetch(`${NOTIFIER_URL}/notify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: product.id, name: product.name, price_cents: product.price_cents }),
+    signal: AbortSignal.timeout(2000),
+  }).catch((err) => {
+    console.error(JSON.stringify({ level: 'warn', msg: 'notify failed', err: err.message }));
+  });
+}
+
 app.post('/products', async (req, res) => {
   const name = (req.body && req.body.name || '').trim();
   const priceCents = Number(req.body && req.body.price_cents);
@@ -64,7 +79,9 @@ app.post('/products', async (req, res) => {
     return res.status(400).json({ error: 'name (string) et price_cents (entier >= 0) requis' });
   }
   try {
-    res.status(201).json(await db.addProduct(name, priceCents));
+    const product = await db.addProduct(name, priceCents);
+    res.status(201).json(product);
+    notifierNouveauProduit(product);
   } catch (err) {
     res.status(503).json({ error: 'db_unavailable', detail: err.message });
   }

@@ -2,11 +2,18 @@ name: demo-api
 
 services:
   api:
-    build: ./api
+    build:
+      context: ./api
+      dockerfile: Dockerfile.multi   # la même image que celle scannée et publiée par la CI
+    # En local : image construite et nommée demo-api/api:local.
+    # Au déploiement : IMAGE_PREFIX et IMAGE_TAG pointent vers l'image publiée
+    # sur GHCR par la CI, que "docker compose pull" récupère (pas de rebuild).
+    image: ${IMAGE_PREFIX:-demo-api}/api:${IMAGE_TAG:-local}
     environment:
       PGHOST: db
       PGUSER: ${POSTGRES_USER}
       PGDATABASE: ${POSTGRES_DB}
+      NOTIFIER_PORT: "4000"
     # db.js lit PGPASSWORD : on le remplit depuis le secret au démarrage,
     # puis exec pour que node reste le PID 1 (arrêt propre sur SIGTERM)
     command: ["sh", "-c", "PGPASSWORD=\"$$(cat /run/secrets/db_password)\" exec node server.js"]
@@ -17,6 +24,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  notifier:
+    build: ./notifier
+    image: ${IMAGE_PREFIX:-demo-api}/notifier:${IMAGE_TAG:-local}
+    environment:
+      PORT: "4000"
+    networks: [back]        # jamais exposé : seule l'API l'appelle
     restart: unless-stopped
 
   db:
